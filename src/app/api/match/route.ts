@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 
-// Global variable for in-memory queue.
-// In a real production deployment, this should be replaced with a Redis queue.
-const globalQueue = globalThis as unknown as { rooms: Record<string, string> };
+// Global variable for in-memory queue/rooms.
+// rooms map RoomID to an array of PeerIDs
+const globalQueue = globalThis as unknown as { rooms: Record<string, string[]> };
 if (!globalQueue.rooms) {
   globalQueue.rooms = {};
 }
@@ -10,24 +10,39 @@ if (!globalQueue.rooms) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { peerId, roomId = 'random' } = body; // default to 'random' queue
+    const { peerId, roomId = 'random' } = body;
 
     if (!peerId) {
       return NextResponse.json({ error: 'PeerID is required' }, { status: 400 });
     }
 
-    const waitingPeer = globalQueue.rooms[roomId];
-
-    if (waitingPeer && waitingPeer !== peerId) {
-      // We have a match in this room!
-      const match = waitingPeer;
-      delete globalQueue.rooms[roomId]; // Clear the room/queue
-      return NextResponse.json({ match });
-    } else {
-      // No one is waiting in this room, so this user becomes the waiter
-      globalQueue.rooms[roomId] = peerId;
-      return NextResponse.json({ status: 'waiting' });
+    if (!globalQueue.rooms[roomId]) {
+      globalQueue.rooms[roomId] = [];
     }
+
+    // If it's a random room and someone is waiting (for 1-to-1), we match and remove them
+    // Actually, to make 'random' faster and 1-to-1, we pop the queue.
+    if (roomId === 'random') {
+      if (globalQueue.rooms['random'].length > 0 && !globalQueue.rooms['random'].includes(peerId)) {
+        const match = globalQueue.rooms['random'].shift(); // take the first waiting
+        return NextResponse.json({ peers: match ? [match] : [] });
+      } else {
+        if (!globalQueue.rooms['random'].includes(peerId)) {
+          globalQueue.rooms['random'].push(peerId);
+        }
+        return NextResponse.json({ status: 'waiting', peers: [] });
+      }
+    }
+
+    // For specific rooms, it's a GROUP room. Return all existing peers.
+    const existingPeers = globalQueue.rooms[roomId].filter(id => id !== peerId);
+    
+    // Add ourselves to the room
+    if (!globalQueue.rooms[roomId].includes(peerId)) {
+      globalQueue.rooms[roomId].push(peerId);
+    }
+
+    return NextResponse.json({ peers: existingPeers });
   } catch (e) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
@@ -36,16 +51,20 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const body = await req.json();
-    const { peerId, roomId = 'random' } = body;
+    const { peerId, roomId } = body;
     
-    if (globalQueue.rooms[roomId] === peerId) {
-      delete globalQueue.rooms[roomId];
-    }
-    
-    // Fallback: search across all rooms just in case
-    for (const [key, value] of Object.entries(globalQueue.rooms)) {
-      if (value === peerId) {
-        delete globalQueue.rooms[key];
+    if (roomId && globalQueue.rooms[roomId]) {
+       globalQueue.rooms[roomId] = globalQueue.rooms[roomId].filter(id => id !== peerId);
+       if (globalQueue.rooms[roomId].length === 0) {
+         delete globalQueue.rooms[roomId];
+       }
+    } else {
+      // Fallback: remove from all rooms
+      for (const [key, peers] of Object.entries(globalQueue.rooms)) {
+        globalQueue.rooms[key] = peers.filter(id => id !== peerId);
+        if (globalQueue.rooms[key].length === 0) {
+          delete globalQueue.rooms[key];
+        }
       }
     }
     

@@ -4,11 +4,41 @@ import { useEffect, useState, useRef, Suspense } from "react";
 import type { Peer, MediaConnection } from "peerjs";
 import { useSearchParams, useRouter } from "next/navigation";
 
+function VideoPlayer({ stream, label, isLocal, muted, onMuteToggle }: { stream: MediaStream | null; label: string; isLocal?: boolean; muted?: boolean; onMuteToggle?: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className="video-wrapper">
+      <span className="video-label">{label}</span>
+      <video 
+        ref={videoRef} 
+        autoPlay 
+        playsInline 
+        muted={isLocal ? true : muted} 
+        className={`video-player ${isLocal ? 'mirror' : ''}`} 
+      />
+      {onMuteToggle && !isLocal && (
+        <button className="mute-btn" onClick={onMuteToggle}>
+          {muted ? '🔇 Unmute' : '🔊 Mute'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ChatApp() {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [status, setStatus] = useState<"idle" | "finding" | "connected">("idle");
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
-  const [networkStats, setNetworkStats] = useState<{ latency: number; bitrate: number } | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [mutedPeers, setMutedPeers] = useState<Record<string, boolean>>({});
+  const [isLocalMuted, setIsLocalMuted] = useState(false);
   
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -18,13 +48,8 @@ function ChatApp() {
   const [activeRoom, setActiveRoom] = useState<string>(roomIdFromUrl || 'random');
   const [shareLink, setShareLink] = useState<string>('');
   
-  const currentCallRef = useRef<MediaConnection | null>(null);
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
+  const callsRef = useRef<Record<string, MediaConnection>>({});
   const peerRef = useRef<Peer | null>(null);
-  
-  const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastStatsRef = useRef({ timestamp: 0, bytesReceived: 0, bytesSent: 0 });
 
   useEffect(() => {
     if (roomIdFromUrl && typeof window !== 'undefined') {
@@ -41,26 +66,14 @@ function ChatApp() {
       
       newPeer.on("call", (call) => {
         console.log("Incoming call from: " + call.peer);
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
-          setMyStream(stream);
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = stream;
-          }
-
-          call.answer(stream);
-          currentCallRef.current = call;
-          setStatus("connected");
-          
-          call.on("stream", (remoteStream) => {
-            if (partnerVideoRef.current) {
-              partnerVideoRef.current.srcObject = remoteStream;
-            }
-            startStatsInterval(call.peerConnection);
-          });
-
-          call.on("close", () => {
-            handleDisconnect();
-          });
+        // Answer automatically if we have our stream ready
+        setMyStream((currentStream) => {
+           if (currentStream) {
+             call.answer(currentStream);
+             handleIncomingCall(call);
+             setStatus("connected");
+           }
+           return currentStream;
         });
       });
 
@@ -72,96 +85,67 @@ function ChatApp() {
       if (peerRef.current) {
         peerRef.current.destroy();
       }
-      if (myStream) {
-        myStream.getTracks().forEach(track => track.stop());
-      }
-      clearStatsInterval();
+      stopAllMedia();
     };
   }, []);
 
-  const startStatsInterval = (pc: RTCPeerConnection) => {
-    clearStatsInterval();
-    statsIntervalRef.current = setInterval(async () => {
-      if (pc.signalingState === "closed") return;
-      
-      try {
-        const reports = await pc.getStats();
-        let currentLatency = 0;
-        let currentBytesReceived = 0;
-        let currentBytesSent = 0;
-        
-        reports.forEach(report => {
-          if (report.type === "candidate-pair" && report.state === "succeeded") {
-            currentLatency = report.currentRoundTripTime ? report.currentRoundTripTime * 1000 : 0;
-          }
-          if (report.type === "inbound-rtp" && report.kind === "video") {
-             currentBytesReceived += report.bytesReceived || 0;
-          }
-          if (report.type === "outbound-rtp" && report.kind === "video") {
-             currentBytesSent += report.bytesSent || 0;
-          }
-        });
+  const handleIncomingCall = (call: MediaConnection) => {
+    callsRef.current[call.peer] = call;
+    
+    call.on("stream", (remoteStream) => {
+      setRemoteStreams(prev => ({ ...prev, [call.peer]: remoteStream }));
+    });
 
-        const now = performance.now();
-        const last = lastStatsRef.current;
-        let kbps = 0;
+    call.on("close", () => {
+      removePeer(call.peer);
+    });
+    call.on("error", () => {
+      removePeer(call.peer);
+    });
+  };
 
-        if (last.timestamp !== 0) {
-          const timeDiff = (now - last.timestamp) / 1000;
-          const bytesDiff = (currentBytesReceived + currentBytesSent) - (last.bytesReceived + last.bytesSent);
-          if (bytesDiff > 0 && timeDiff > 0) {
-            kbps = (bytesDiff * 8) / 1000 / timeDiff;
-          }
-        }
+  const removePeer = (peerId: string) => {
+    setRemoteStreams(prev => {
+      const next = { ...prev };
+      delete next[peerId];
+      return next;
+    });
+    if (callsRef.current[peerId]) {
+      callsRef.current[peerId].close();
+      delete callsRef.current[peerId];
+    }
+    // If it's a random 1-on-1 and they left, disconnect fully
+    if (activeRoom === 'random') {
+       handleDisconnect(true); // stay in finding mode
+       startFinding('random');
+    }
+  };
 
-        lastStatsRef.current = {
-          timestamp: now,
-          bytesReceived: currentBytesReceived,
-          bytesSent: currentBytesSent,
-        };
-
-        setNetworkStats({
-          latency: Math.round(currentLatency),
-          bitrate: Math.round(kbps),
-        });
-      } catch (err) {
-        console.error("Error fetching stats", err);
+  const stopAllMedia = () => {
+    setMyStream((current) => {
+      if (current) {
+        current.getTracks().forEach(track => track.stop());
       }
-    }, 1000);
+      return null;
+    });
   };
 
-  const clearStatsInterval = () => {
-    if (statsIntervalRef.current) {
-      clearInterval(statsIntervalRef.current);
-      statsIntervalRef.current = null;
-    }
-    setNetworkStats(null);
-    lastStatsRef.current = { timestamp: 0, bytesReceived: 0, bytesSent: 0 };
-  };
-
-  const handleDisconnect = () => {
-    setStatus("idle");
-    clearStatsInterval();
-    if (currentCallRef.current) {
-      currentCallRef.current.close();
-      currentCallRef.current = null;
-    }
-    if (partnerVideoRef.current) {
-      partnerVideoRef.current.srcObject = null;
+  const handleDisconnect = (keepStream = false) => {
+    setStatus(keepStream ? "finding" : "idle");
+    
+    Object.values(callsRef.current).forEach(call => call.close());
+    callsRef.current = {};
+    setRemoteStreams({});
+    setMutedPeers({});
+    
+    if (!keepStream) {
+      stopAllMedia();
     }
   };
 
   const stopCall = async () => {
-    handleDisconnect();
+    handleDisconnect(false);
     
-    // Turn off camera completely
-    if (localVideoRef.current && localVideoRef.current.srcObject) {
-      const stream = localVideoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      localVideoRef.current.srcObject = null;
-    }
-    setMyStream(null);
-
     if (peerRef.current) {
       await fetch('/api/match', {
         method: 'DELETE',
@@ -169,11 +153,6 @@ function ChatApp() {
         body: JSON.stringify({ peerId: peerRef.current.id, roomId: activeRoom }),
       });
     }
-  };
-
-  const nextCall = async () => {
-    handleDisconnect();
-    await startFinding(activeRoom);
   };
 
   const startFinding = async (targetRoom = 'random') => {
@@ -185,21 +164,18 @@ function ChatApp() {
     let stream = myStream;
     if (!stream) {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        // Optimize for speed and smoothness in group calls
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 480, height: 360, frameRate: 24 }, 
+          audio: true 
+        });
         setMyStream(stream);
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
       } catch (err) {
         console.error("Failed to get local stream", err);
         setStatus("idle");
         alert("Please allow camera and microphone access to chat.");
         return;
       }
-    } else {
-       if (localVideoRef.current && !localVideoRef.current.srcObject) {
-         localVideoRef.current.srcObject = stream;
-       }
     }
 
     try {
@@ -210,26 +186,15 @@ function ChatApp() {
       });
       const data = await res.json();
 
-      if (data.match) {
-        console.log("Found a match! Calling: ", data.match);
-        const call = peer.call(data.match, stream);
-        currentCallRef.current = call;
+      if (data.peers && data.peers.length > 0) {
+        console.log("Found peers! Calling: ", data.peers);
         setStatus("connected");
-
-        call.on("stream", (remoteStream) => {
-          if (partnerVideoRef.current) {
-            partnerVideoRef.current.srcObject = remoteStream;
-          }
-          startStatsInterval(call.peerConnection);
-        });
-
-        call.on("close", () => {
-          handleDisconnect();
-        });
         
-        call.on("error", (err) => {
-          console.error("Call error:", err);
-          handleDisconnect();
+        // Call all existing peers in the room
+        data.peers.forEach((remotePeerId: string) => {
+          if (!stream) return;
+          const call = peer.call(remotePeerId, stream);
+          handleIncomingCall(call);
         });
       } else {
         console.log("Waiting in queue...");
@@ -238,6 +203,23 @@ function ChatApp() {
       console.error("Matchmaking error:", error);
       setStatus("idle");
     }
+  };
+
+  const toggleLocalMute = () => {
+    if (myStream) {
+      const audioTracks = myStream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        audioTracks[0].enabled = !audioTracks[0].enabled;
+        setIsLocalMuted(!audioTracks[0].enabled);
+      }
+    }
+  };
+
+  const togglePeerMute = (peerId: string) => {
+    setMutedPeers(prev => ({
+      ...prev,
+      [peerId]: !prev[peerId]
+    }));
   };
 
   const generateRoom = () => {
@@ -259,39 +241,43 @@ function ChatApp() {
     alert('Room link copied to clipboard!');
   };
 
+  const hasPeers = Object.keys(remoteStreams).length > 0;
+
   return (
     <>
       <div className="bg-shape shape-1"></div>
       <div className="bg-shape shape-2"></div>
       
       <main className="container">
-        <div className="glass-card">
+        <div className="glass-card" style={{ maxWidth: '1000px', width: '100%' }}>
           <h1>VibeChat</h1>
-          <p>Connect randomly or create a private room to chat face-to-face.</p>
+          <p>Connect randomly or create a group room to chat with multiple people.</p>
 
           <div className="status-badge">
             <span className={`status-dot ${status === 'finding' ? 'connecting' : status === 'connected' ? 'connected' : 'idle'}`}></span>
             {status === "idle" && "Ready to connect"}
-            {status === "finding" && (activeRoom === 'random' ? "Finding a random partner..." : `Waiting for partner in room: ${activeRoom}`)}
-            {status === "connected" && (activeRoom === 'random' ? "Connected Randomly!" : `Connected in Room: ${activeRoom}`)}
+            {status === "finding" && (activeRoom === 'random' ? "Finding a random partner..." : `Waiting in Room: ${activeRoom}`)}
+            {status === "connected" && (activeRoom === 'random' ? "Connected!" : `Connected in Room: ${activeRoom}`)}
           </div>
-          
-          {networkStats && (
-            <div className="network-stats">
-              <span title="Round Trip Time (Ping)">📶 {networkStats.latency} ms</span>
-              <span title="Total Bitrate">⚡ {networkStats.bitrate} kbps</span>
-            </div>
-          )}
 
           <div className={`video-container ${status !== 'idle' ? 'active' : ''}`}>
-             <div className="video-wrapper">
-               <span className="video-label">You</span>
-               <video ref={localVideoRef} autoPlay playsInline muted className="video-player" />
-             </div>
-             <div className="video-wrapper">
-               <span className="video-label">Partner</span>
-               <video ref={partnerVideoRef} autoPlay playsInline className="video-player" />
-             </div>
+             <VideoPlayer stream={myStream} label="You" isLocal={true} />
+             
+             {Object.entries(remoteStreams).map(([peerId, stream], index) => (
+               <VideoPlayer 
+                 key={peerId} 
+                 stream={stream} 
+                 label={`Peer ${index + 1}`} 
+                 muted={mutedPeers[peerId] || false}
+                 onMuteToggle={() => togglePeerMute(peerId)}
+               />
+             ))}
+
+             {status === 'connected' && !hasPeers && (
+                <div style={{ color: '#94a3b8', alignSelf: 'center', margin: '2rem' }}>
+                  Waiting for others to join...
+                </div>
+             )}
           </div>
 
           {status === "idle" ? (
@@ -301,7 +287,7 @@ function ChatApp() {
               </button>
               
               <div className="room-controls">
-                <div className="divider"><span>OR</span></div>
+                <div className="divider"><span>OR JOIN GROUP ROOM</span></div>
                 
                 <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
                   <input 
@@ -329,12 +315,17 @@ function ChatApp() {
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-              <button className="btn btn-danger" onClick={stopCall}>
-                {status === "connected" ? "Disconnect" : "Cancel"}
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button className={`btn ${isLocalMuted ? 'btn-danger' : 'btn-secondary'}`} onClick={toggleLocalMute}>
+                {isLocalMuted ? "🔇 Unmute Mic" : "🎤 Mute Mic"}
               </button>
-              {status === "connected" && activeRoom === 'random' && (
-                <button className="btn btn-primary" onClick={nextCall}>
+              
+              <button className="btn btn-danger" onClick={stopCall}>
+                Leave
+              </button>
+              
+              {activeRoom === 'random' && (
+                <button className="btn btn-primary" onClick={() => { handleDisconnect(true); startFinding('random'); }}>
                   Next
                 </button>
               )}
