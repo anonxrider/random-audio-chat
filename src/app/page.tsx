@@ -79,6 +79,14 @@ export default function Home() {
     }
   };
 
+  const nextCall = async () => {
+    // Stop the current connection without removing from queue manually since we'll re-enter
+    handleDisconnect();
+    
+    // Start finding again immediately
+    await startFinding();
+  };
+
   const startFinding = async () => {
     if (!peer || !peer.id) return;
     
@@ -169,9 +177,16 @@ export default function Home() {
               Find a Partner
             </button>
           ) : (
-            <button className="btn btn-danger" onClick={stopCall}>
-              {status === "connected" ? "Disconnect" : "Cancel"}
-            </button>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button className="btn btn-danger" onClick={stopCall}>
+                {status === "connected" ? "Disconnect" : "Cancel"}
+              </button>
+              {status === "connected" && (
+                <button className="btn btn-primary" onClick={nextCall}>
+                  Next
+                </button>
+              )}
+            </div>
           )}
 
           <div className="footer-text">
