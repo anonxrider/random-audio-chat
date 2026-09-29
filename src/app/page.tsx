@@ -9,7 +9,8 @@ export default function Home() {
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
   
   const currentCallRef = useRef<MediaConnection | null>(null);
-  const partnerAudioRef = useRef<HTMLAudioElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
   const peerRef = useRef<Peer | null>(null);
 
   useEffect(() => {
@@ -22,20 +23,19 @@ export default function Home() {
       
       newPeer.on("call", (call) => {
         console.log("Incoming call from: " + call.peer);
-        // If we're already connected to someone else, we probably shouldn't answer, 
-        // but for a simple prototype we just answer.
-        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
           setMyStream(stream);
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+
           call.answer(stream);
           currentCallRef.current = call;
           setStatus("connected");
           
           call.on("stream", (remoteStream) => {
-            if (partnerAudioRef.current) {
-              partnerAudioRef.current.srcObject = remoteStream;
-              // Browsers might block autoplay without user interaction, 
-              // but since they clicked "Start" it should be fine.
-              partnerAudioRef.current.play().catch(e => console.error("Audio play error:", e));
+            if (partnerVideoRef.current) {
+              partnerVideoRef.current.srcObject = remoteStream;
             }
           });
 
@@ -53,6 +53,9 @@ export default function Home() {
       if (peerRef.current) {
         peerRef.current.destroy();
       }
+      if (myStream) {
+        myStream.getTracks().forEach(track => track.stop());
+      }
     };
   }, []);
 
@@ -62,8 +65,8 @@ export default function Home() {
       currentCallRef.current.close();
       currentCallRef.current = null;
     }
-    if (partnerAudioRef.current) {
-      partnerAudioRef.current.srcObject = null;
+    if (partnerVideoRef.current) {
+      partnerVideoRef.current.srcObject = null;
     }
   };
 
@@ -80,10 +83,7 @@ export default function Home() {
   };
 
   const nextCall = async () => {
-    // Stop the current connection without removing from queue manually since we'll re-enter
     handleDisconnect();
-    
-    // Start finding again immediately
     await startFinding();
   };
 
@@ -95,14 +95,21 @@ export default function Home() {
     let stream = myStream;
     if (!stream) {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         setMyStream(stream);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
       } catch (err) {
         console.error("Failed to get local stream", err);
         setStatus("idle");
-        alert("Please allow microphone access to chat.");
+        alert("Please allow camera and microphone access to chat.");
         return;
       }
+    } else {
+       if (localVideoRef.current && !localVideoRef.current.srcObject) {
+         localVideoRef.current.srcObject = stream;
+       }
     }
 
     try {
@@ -115,15 +122,13 @@ export default function Home() {
 
       if (data.match) {
         console.log("Found a match! Calling: ", data.match);
-        // Call the match
         const call = peer.call(data.match, stream);
         currentCallRef.current = call;
         setStatus("connected");
 
         call.on("stream", (remoteStream) => {
-          if (partnerAudioRef.current) {
-            partnerAudioRef.current.srcObject = remoteStream;
-            partnerAudioRef.current.play().catch(e => console.error("Audio play error:", e));
+          if (partnerVideoRef.current) {
+            partnerVideoRef.current.srcObject = remoteStream;
           }
         });
 
@@ -137,7 +142,6 @@ export default function Home() {
         });
       } else {
         console.log("Waiting in queue...");
-        // Status is 'finding', waiting for 'peer.on("call")' to trigger
       }
     } catch (error) {
       console.error("Matchmaking error:", error);
@@ -153,7 +157,7 @@ export default function Home() {
       <main className="container">
         <div className="glass-card">
           <h1>VibeChat</h1>
-          <p>Connect randomly and chat instantly. No strings attached.</p>
+          <p>Connect randomly and chat instantly face-to-face.</p>
 
           <div className="status-badge">
             <span className={`status-dot ${status === 'finding' ? 'connecting' : status === 'connected' ? 'connected' : 'idle'}`}></span>
@@ -162,22 +166,23 @@ export default function Home() {
             {status === "connected" && "Connected!"}
           </div>
 
-          <div className={`audio-visualizer ${status === 'connected' ? 'active' : ''}`}>
-            <div className="bar"></div>
-            <div className="bar"></div>
-            <div className="bar"></div>
-            <div className="bar"></div>
-            <div className="bar"></div>
+          <div className={`video-container ${status !== 'idle' ? 'active' : ''}`}>
+             <div className="video-wrapper">
+               <span className="video-label">You</span>
+               <video ref={localVideoRef} autoPlay playsInline muted className="video-player" />
+             </div>
+             <div className="video-wrapper">
+               <span className="video-label">Partner</span>
+               <video ref={partnerVideoRef} autoPlay playsInline className="video-player" />
+             </div>
           </div>
-
-          <audio ref={partnerAudioRef} style={{ display: 'none' }} />
 
           {status === "idle" ? (
             <button className="btn btn-primary" onClick={startFinding} disabled={!peer}>
               Find a Partner
             </button>
           ) : (
-            <div style={{ display: 'flex', gap: '1rem' }}>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
               <button className="btn btn-danger" onClick={stopCall}>
                 {status === "connected" ? "Disconnect" : "Cancel"}
               </button>
@@ -190,7 +195,7 @@ export default function Home() {
           )}
 
           <div className="footer-text">
-            Ensure your microphone is enabled before starting.
+            Ensure your camera and microphone are enabled before starting.
           </div>
         </div>
       </main>

@@ -66,7 +66,7 @@ body {
 
 .container {
   width: 100%;
-  max-width: 600px;
+  max-width: 900px;
   padding: 2rem;
   z-index: 10;
 }
@@ -86,15 +86,12 @@ body {
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.glass-card:hover {
-  transform: translateY(-5px);
-}
-
 h1 {
   font-size: 2.5rem;
   font-weight: 700;
   margin-bottom: 0.5rem;
   background: linear-gradient(to right, #a78bfa, #f472b6);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -113,7 +110,7 @@ p {
   border-radius: 9999px;
   font-size: 0.875rem;
   font-weight: 500;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--surface-border);
   transition: all 0.3s ease;
@@ -188,41 +185,61 @@ p {
   box-shadow: none !important;
 }
 
-.audio-visualizer {
+/* Video Styles */
+.video-container {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 6px;
-  height: 60px;
+  gap: 1.5rem;
+  width: 100%;
   margin-bottom: 2rem;
+  display: none; /* Hide when idle */
   opacity: 0;
   transition: opacity 0.5s ease;
 }
 
-.audio-visualizer.active {
+.video-container.active {
+  display: flex;
   opacity: 1;
 }
 
-.bar {
-  width: 8px;
-  height: 10px;
-  background: linear-gradient(to top, #a78bfa, #f472b6);
-  border-radius: 4px;
+.video-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 4/3;
+  background: #000;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--surface-border);
 }
 
-.audio-visualizer.active .bar {
-  animation: visualize 1s infinite ease-in-out alternate;
+.video-label {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+  z-index: 10;
 }
 
-.bar:nth-child(1) { animation-delay: 0.1s; }
-.bar:nth-child(2) { animation-delay: 0.2s; }
-.bar:nth-child(3) { animation-delay: 0.4s; }
-.bar:nth-child(4) { animation-delay: 0.3s; }
-.bar:nth-child(5) { animation-delay: 0.5s; }
+.video-player {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #111;
+  /* Add subtle mirror effect for self view only but css doesn't know which is which unless class added, let's keep it simple */
+}
 
-@keyframes visualize {
-  0% { height: 10px; }
-  100% { height: 50px; }
+/* Make local video mirrored */
+.video-wrapper:first-child .video-player {
+  transform: scaleX(-1);
 }
 
 .footer-text {
