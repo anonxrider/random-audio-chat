@@ -145,11 +145,16 @@ p {
   border: 1px solid rgba(167, 139, 250, 0.2);
 }
 
+.controls {
+  width: 100%;
+  max-width: 400px;
+}
+
 .btn {
   border: none;
   border-radius: 12px;
-  padding: 1rem 2.5rem;
-  font-size: 1.125rem;
+  padding: 1rem 1.5rem;
+  font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -171,8 +176,23 @@ p {
   box-shadow: 0 15px 25px -10px var(--primary-glow);
 }
 
-.btn-primary:active {
-  transform: translateY(1px);
+.btn-secondary {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid var(--surface-border);
+}
+
+.btn-secondary:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.btn-outline {
+  background: transparent;
+  border: 2px solid var(--primary);
+  color: var(--primary);
+}
+
+.btn-outline:hover {
+  background: rgba(139, 92, 246, 0.1);
 }
 
 .btn-danger {
@@ -186,15 +206,79 @@ p {
   box-shadow: 0 15px 25px -10px rgba(239, 68, 68, 0.5);
 }
 
-.btn-danger:active {
-  transform: translateY(1px);
-}
-
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none !important;
   box-shadow: none !important;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--text-muted);
+  margin: 1.5rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.divider span {
+  padding: 0 10px;
+}
+
+.room-input {
+  flex: 1;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--surface-border);
+  border-radius: 12px;
+  padding: 1rem;
+  color: white;
+  font-size: 1rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.room-input:focus {
+  border-color: var(--primary);
+}
+
+.share-box {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0,0,0,0.3);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px dashed var(--primary);
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  word-break: break-all;
+  text-align: left;
+}
+
+.copy-btn {
+  background: var(--primary);
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: 1rem;
+  font-weight: 500;
+}
+
+.copy-btn:hover {
+  background: var(--primary-hover);
 }
 
 /* Video Styles */

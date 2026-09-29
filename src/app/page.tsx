@@ -1,13 +1,22 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import type { Peer, MediaConnection } from "peerjs";
+import { useSearchParams, useRouter } from "next/navigation";
 
-export default function Home() {
+function ChatApp() {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [status, setStatus] = useState<"idle" | "finding" | "connected">("idle");
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
   const [networkStats, setNetworkStats] = useState<{ latency: number; bitrate: number } | null>(null);
+  
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const roomIdFromUrl = searchParams.get('room');
+  
+  const [roomInput, setRoomInput] = useState<string>(roomIdFromUrl || '');
+  const [activeRoom, setActiveRoom] = useState<string>(roomIdFromUrl || 'random');
+  const [shareLink, setShareLink] = useState<string>('');
   
   const currentCallRef = useRef<MediaConnection | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -16,6 +25,12 @@ export default function Home() {
   
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastStatsRef = useRef({ timestamp: 0, bytesReceived: 0, bytesSent: 0 });
+
+  useEffect(() => {
+    if (roomIdFromUrl && typeof window !== 'undefined') {
+      setShareLink(`${window.location.origin}/?room=${roomIdFromUrl}`);
+    }
+  }, [roomIdFromUrl]);
 
   useEffect(() => {
     import("peerjs").then(({ default: Peer }) => {
@@ -138,24 +153,34 @@ export default function Home() {
 
   const stopCall = async () => {
     handleDisconnect();
+    
+    // Turn off camera completely
+    if (localVideoRef.current && localVideoRef.current.srcObject) {
+      const stream = localVideoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      localVideoRef.current.srcObject = null;
+    }
+    setMyStream(null);
+
     if (peerRef.current) {
       await fetch('/api/match', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ peerId: peerRef.current.id }),
+        body: JSON.stringify({ peerId: peerRef.current.id, roomId: activeRoom }),
       });
     }
   };
 
   const nextCall = async () => {
     handleDisconnect();
-    await startFinding();
+    await startFinding(activeRoom);
   };
 
-  const startFinding = async () => {
+  const startFinding = async (targetRoom = 'random') => {
     if (!peer || !peer.id) return;
     
     setStatus("finding");
+    setActiveRoom(targetRoom);
 
     let stream = myStream;
     if (!stream) {
@@ -181,7 +206,7 @@ export default function Home() {
       const res = await fetch('/api/match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ peerId: peer.id }),
+        body: JSON.stringify({ peerId: peer.id, roomId: targetRoom }),
       });
       const data = await res.json();
 
@@ -215,6 +240,25 @@ export default function Home() {
     }
   };
 
+  const generateRoom = () => {
+    const newRoom = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setRoomInput(newRoom);
+    setShareLink(`${window.location.origin}/?room=${newRoom}`);
+    router.push(`/?room=${newRoom}`);
+  };
+
+  const joinSpecificRoom = () => {
+    if (!roomInput) return alert("Please enter a room code");
+    setShareLink(`${window.location.origin}/?room=${roomInput.toUpperCase()}`);
+    router.push(`/?room=${roomInput.toUpperCase()}`);
+    startFinding(roomInput.toUpperCase());
+  };
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(shareLink);
+    alert('Room link copied to clipboard!');
+  };
+
   return (
     <>
       <div className="bg-shape shape-1"></div>
@@ -223,13 +267,13 @@ export default function Home() {
       <main className="container">
         <div className="glass-card">
           <h1>VibeChat</h1>
-          <p>Connect randomly and chat instantly face-to-face.</p>
+          <p>Connect randomly or create a private room to chat face-to-face.</p>
 
           <div className="status-badge">
             <span className={`status-dot ${status === 'finding' ? 'connecting' : status === 'connected' ? 'connected' : 'idle'}`}></span>
             {status === "idle" && "Ready to connect"}
-            {status === "finding" && "Finding a partner..."}
-            {status === "connected" && "Connected!"}
+            {status === "finding" && (activeRoom === 'random' ? "Finding a random partner..." : `Waiting for partner in room: ${activeRoom}`)}
+            {status === "connected" && (activeRoom === 'random' ? "Connected Randomly!" : `Connected in Room: ${activeRoom}`)}
           </div>
           
           {networkStats && (
@@ -251,27 +295,61 @@ export default function Home() {
           </div>
 
           {status === "idle" ? (
-            <button className="btn btn-primary" onClick={startFinding} disabled={!peer}>
-              Find a Partner
-            </button>
+            <div className="controls">
+              <button className="btn btn-primary" style={{ width: '100%', marginBottom: '1.5rem' }} onClick={() => startFinding('random')} disabled={!peer}>
+                Join Random Chat
+              </button>
+              
+              <div className="room-controls">
+                <div className="divider"><span>OR</span></div>
+                
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <input 
+                    type="text" 
+                    placeholder="Enter Room Code" 
+                    value={roomInput}
+                    onChange={(e) => setRoomInput(e.target.value)}
+                    className="room-input"
+                  />
+                  <button className="btn btn-secondary" onClick={joinSpecificRoom} disabled={!peer}>
+                    Join
+                  </button>
+                </div>
+                
+                <button className="btn btn-outline" style={{ width: '100%' }} onClick={generateRoom}>
+                  Generate Private Room
+                </button>
+
+                {shareLink && (
+                   <div className="share-box">
+                     <span>{shareLink}</span>
+                     <button onClick={copyLink} className="copy-btn">Copy</button>
+                   </div>
+                )}
+              </div>
+            </div>
           ) : (
             <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
               <button className="btn btn-danger" onClick={stopCall}>
                 {status === "connected" ? "Disconnect" : "Cancel"}
               </button>
-              {status === "connected" && (
+              {status === "connected" && activeRoom === 'random' && (
                 <button className="btn btn-primary" onClick={nextCall}>
                   Next
                 </button>
               )}
             </div>
           )}
-
-          <div className="footer-text">
-            Ensure your camera and microphone are enabled before starting.
-          </div>
         </div>
       </main>
     </>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div style={{ color: 'white' }}>Loading...</div>}>
+      <ChatApp />
+    </Suspense>
   );
 }
