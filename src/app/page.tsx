@@ -7,14 +7,17 @@ export default function Home() {
   const [peer, setPeer] = useState<Peer | null>(null);
   const [status, setStatus] = useState<"idle" | "finding" | "connected">("idle");
   const [myStream, setMyStream] = useState<MediaStream | null>(null);
+  const [networkStats, setNetworkStats] = useState<{ latency: number; bitrate: number } | null>(null);
   
   const currentCallRef = useRef<MediaConnection | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const partnerVideoRef = useRef<HTMLVideoElement | null>(null);
   const peerRef = useRef<Peer | null>(null);
+  
+  const statsIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastStatsRef = useRef({ timestamp: 0, bytesReceived: 0, bytesSent: 0 });
 
   useEffect(() => {
-    // Dynamic import to avoid SSR issues with PeerJS
     import("peerjs").then(({ default: Peer }) => {
       const newPeer = new Peer();
       newPeer.on("open", (id) => {
@@ -37,6 +40,7 @@ export default function Home() {
             if (partnerVideoRef.current) {
               partnerVideoRef.current.srcObject = remoteStream;
             }
+            startStatsInterval(call.peerConnection);
           });
 
           call.on("close", () => {
@@ -56,11 +60,73 @@ export default function Home() {
       if (myStream) {
         myStream.getTracks().forEach(track => track.stop());
       }
+      clearStatsInterval();
     };
   }, []);
 
+  const startStatsInterval = (pc: RTCPeerConnection) => {
+    clearStatsInterval();
+    statsIntervalRef.current = setInterval(async () => {
+      if (pc.signalingState === "closed") return;
+      
+      try {
+        const reports = await pc.getStats();
+        let currentLatency = 0;
+        let currentBytesReceived = 0;
+        let currentBytesSent = 0;
+        
+        reports.forEach(report => {
+          if (report.type === "candidate-pair" && report.state === "succeeded") {
+            currentLatency = report.currentRoundTripTime ? report.currentRoundTripTime * 1000 : 0;
+          }
+          if (report.type === "inbound-rtp" && report.kind === "video") {
+             currentBytesReceived += report.bytesReceived || 0;
+          }
+          if (report.type === "outbound-rtp" && report.kind === "video") {
+             currentBytesSent += report.bytesSent || 0;
+          }
+        });
+
+        const now = performance.now();
+        const last = lastStatsRef.current;
+        let kbps = 0;
+
+        if (last.timestamp !== 0) {
+          const timeDiff = (now - last.timestamp) / 1000;
+          const bytesDiff = (currentBytesReceived + currentBytesSent) - (last.bytesReceived + last.bytesSent);
+          if (bytesDiff > 0 && timeDiff > 0) {
+            kbps = (bytesDiff * 8) / 1000 / timeDiff;
+          }
+        }
+
+        lastStatsRef.current = {
+          timestamp: now,
+          bytesReceived: currentBytesReceived,
+          bytesSent: currentBytesSent,
+        };
+
+        setNetworkStats({
+          latency: Math.round(currentLatency),
+          bitrate: Math.round(kbps),
+        });
+      } catch (err) {
+        console.error("Error fetching stats", err);
+      }
+    }, 1000);
+  };
+
+  const clearStatsInterval = () => {
+    if (statsIntervalRef.current) {
+      clearInterval(statsIntervalRef.current);
+      statsIntervalRef.current = null;
+    }
+    setNetworkStats(null);
+    lastStatsRef.current = { timestamp: 0, bytesReceived: 0, bytesSent: 0 };
+  };
+
   const handleDisconnect = () => {
     setStatus("idle");
+    clearStatsInterval();
     if (currentCallRef.current) {
       currentCallRef.current.close();
       currentCallRef.current = null;
@@ -72,7 +138,6 @@ export default function Home() {
 
   const stopCall = async () => {
     handleDisconnect();
-    // Also remove from matching queue
     if (peerRef.current) {
       await fetch('/api/match', {
         method: 'DELETE',
@@ -130,6 +195,7 @@ export default function Home() {
           if (partnerVideoRef.current) {
             partnerVideoRef.current.srcObject = remoteStream;
           }
+          startStatsInterval(call.peerConnection);
         });
 
         call.on("close", () => {
@@ -165,6 +231,13 @@ export default function Home() {
             {status === "finding" && "Finding a partner..."}
             {status === "connected" && "Connected!"}
           </div>
+          
+          {networkStats && (
+            <div className="network-stats">
+              <span title="Round Trip Time (Ping)">📶 {networkStats.latency} ms</span>
+              <span title="Total Bitrate">⚡ {networkStats.bitrate} kbps</span>
+            </div>
+          )}
 
           <div className={`video-container ${status !== 'idle' ? 'active' : ''}`}>
              <div className="video-wrapper">

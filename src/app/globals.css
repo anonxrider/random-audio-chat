@@ -110,7 +110,7 @@ p {
   border-radius: 9999px;
   font-size: 0.875rem;
   font-weight: 500;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--surface-border);
   transition: all 0.3s ease;
@@ -131,6 +131,18 @@ p {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.5); opacity: 0.5; }
   100% { transform: scale(1); opacity: 1; }
+}
+
+.network-stats {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.8rem;
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+  padding: 0.4rem 1rem;
+  border-radius: 9999px;
+  margin-bottom: 1.5rem;
+  border: 1px solid rgba(167, 139, 250, 0.2);
 }
 
 .btn {
@@ -193,7 +205,7 @@ p {
   gap: 1.5rem;
   width: 100%;
   margin-bottom: 2rem;
-  display: none; /* Hide when idle */
+  display: none;
   opacity: 0;
   transition: opacity 0.5s ease;
 }
@@ -234,10 +246,8 @@ p {
   height: 100%;
   object-fit: cover;
   background: #111;
-  /* Add subtle mirror effect for self view only but css doesn't know which is which unless class added, let's keep it simple */
 }
 
-/* Make local video mirrored */
 .video-wrapper:first-child .video-player {
   transform: scaleX(-1);
 }
