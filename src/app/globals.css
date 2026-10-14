@@ -644,6 +644,9 @@ html, body {
   height: 100%;
   max-height: 78vh;
   transition: border-color 0.2s, transform 0.2s;
+  transform: translateZ(0);
+  will-change: transform;
+  contain: layout style paint;
 }
 
 .video-tile.speaking {
@@ -661,10 +664,11 @@ html, body {
   height: 100%;
   object-fit: cover;
   background: #000;
+  transform: translateZ(0);
 }
 
 .video-element.mirror {
-  transform: scaleX(-1);
+  transform: scaleX(-1) translateZ(0);
 }
 
 /* Bottom Tag (Participant Name + Mic Status) */
@@ -1250,6 +1254,8 @@ html, body {
   pointer-events: none;
   z-index: 60;
   animation: floatUp 2.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  will-change: transform, opacity;
+  transform: translateZ(0);
 }
 
 @keyframes floatUp {

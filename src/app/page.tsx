@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, Suspense } from "react";
+import { useEffect, useState, useRef, useCallback, Suspense, memo } from "react";
 import type { Peer, MediaConnection, DataConnection } from "peerjs";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -560,7 +560,12 @@ function GoogleMeetApp() {
 
         const { default: Peer } = await import("peerjs");
         const newPeer = new Peer({
-          config: { iceServers },
+          config: {
+            iceServers,
+            iceCandidatePoolSize: 10,
+            bundlePolicy: "max-bundle",
+            rtcpMuxPolicy: "require",
+          },
         });
 
         newPeer.on("open", (id) => {
@@ -858,6 +863,7 @@ function GoogleMeetApp() {
 
         const screenTrack = screenStream.getVideoTracks()[0];
         if (!screenTrack) return;
+        screenTrack.contentHint = "detail";
 
         screenStreamRef.current = screenStream;
 
@@ -2415,8 +2421,8 @@ function GoogleMeetApp() {
   );
 }
 
-// Sub-component for remote participant video tile
-function RemoteParticipantTile({
+// Sub-component for remote participant video tile (memoized to prevent re-renders on timer ticks)
+const RemoteParticipantTile = memo(function RemoteParticipantTile({
   stream,
   index,
   isMuted,
@@ -2428,26 +2434,19 @@ function RemoteParticipantTile({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      if (videoRef.current.srcObject !== stream) {
-        videoRef.current.srcObject = stream;
+    const el = videoRef.current;
+    if (el && stream) {
+      if (el.srcObject !== stream) {
+        el.srcObject = stream;
       }
-      videoRef.current.play().catch(() => {});
+      el.play().catch(() => {});
     }
   }, [stream]);
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <video
-        ref={(el) => {
-          videoRef.current = el;
-          if (el && stream) {
-            if (el.srcObject !== stream) {
-              el.srcObject = stream;
-            }
-            el.play().catch(() => {});
-          }
-        }}
+        ref={videoRef}
         autoPlay
         playsInline
         className="video-element"
@@ -2461,4 +2460,4 @@ function RemoteParticipantTile({
       </div>
     </div>
   );
-}
+});
